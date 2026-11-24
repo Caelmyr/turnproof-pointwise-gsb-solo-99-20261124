@@ -30,8 +30,19 @@
           <div><div id="projectStatus" class="caption"></div><h1 id="projectTitle"></h1></div>
           <div class="action-row">
             <button id="contact">联系表</button>
+            <button id="ringPlan">挑选合格圈</button>
             <button id="seal" class="primary">封存此圈</button>
             <button id="backToReview" hidden>返回工作台</button>
+          </div>
+        </div>
+        <div id="ringBanner" class="ring-banner" hidden>
+          <div>
+            <strong>合格圈预览</strong>
+            <span id="ringSummary" class="caption"></span>
+          </div>
+          <div class="action-row">
+            <button id="ringSeal" class="primary">确认封存这一圈</button>
+            <button id="ringCancel">放弃推荐</button>
           </div>
         </div>
         <section class="work-grid" aria-label="照片检查">
@@ -72,6 +83,15 @@
       <label>工程名称<input id="newTitle" required maxlength="95" placeholder="如：秋季陶器商品图"></label>
       <label>等角度台位<select id="newCount"><option value="6">6 · 每步 60°</option><option value="8">8 · 每步 45°</option><option value="12">12 · 每步 30°</option><option value="18">18 · 每步 20°</option><option value="24">24 · 每步 15°</option></select></label>
       <div class="action-row"><button type="button" data-close="newDialog">取消</button><button class="primary">创建</button></div>
+    </form>
+  </dialog>
+  <dialog id="ringDialog">
+    <form id="ringForm">
+      <h2>挑选合格圈</h2>
+      <p class="caption">每个台位用自己的一张带定位点原片；锁定台位保持锁定原片，缺定位点的照片不参与。相邻过渡（含末张回首）都不超过上限才算成圈。</p>
+      <label>落点移动上限（%）<input id="ringLimit" type="number" required min="0.01" max="100" step="0.01" value="2"></label>
+      <p id="ringError" class="ring-error" hidden></p>
+      <div class="action-row"><button type="button" data-close="ringDialog">取消</button><button class="primary">开始挑选</button></div>
     </form>
   </dialog>
   <dialog id="proofDialog">

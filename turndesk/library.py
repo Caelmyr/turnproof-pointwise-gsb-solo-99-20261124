@@ -13,7 +13,7 @@ from werkzeug.exceptions import NotFound
 
 from image_lab.validation import Conflict, Invalid, boolean, integer, text, timestamp
 
-from . import demo, inspection, photos, proofs
+from . import demo, inspection, photos, proofs, spin
 
 
 KEY = re.compile(r"[0-9a-f]{16}")
@@ -193,10 +193,14 @@ class Library:
         find_capture(self.record(identifier), capture)
         return self.folder(identifier) / "captures" / (capture + (".jpg" if thumbnail else ".png"))
 
-    def contact(self, identifier):
+    def contact(self, identifier, selected=None):
         record = self.record(identifier)
         folder = self.folder(identifier)
-        return proofs.contact_sheet(inspection.manual_frames(record), lambda photo: folder / "captures" / (photo + ".png"))
+        if selected is None:
+            frames = inspection.manual_frames(record)
+        else:
+            frames = proofs.planned_frames(record, spin.validate_selection(record, selected))
+        return proofs.contact_sheet(frames, lambda photo: folder / "captures" / (photo + ".png"))
 
     def proof_list(self, identifier):
         self.record(identifier)
@@ -211,18 +215,30 @@ class Library:
         folder = self.folder(identifier) / "proofs" / key(proof)
         return folder, read(folder / "proof.json")
 
-    def create_proof(self, identifier, expected, label):
+    def ring_plan(self, identifier, limit):
+        # Read-only: the workbench's manual selections and locks are never changed.
+        return spin.plan(self.record(identifier), limit)
+
+    def create_proof(self, identifier, expected, label, selected=None):
         with self.lock:
             record = self.record(identifier)
             revision(record, expected)
             folder = self.folder(identifier)
+            planned = None
+            if selected is not None:
+                try:
+                    captures = spin.validate_selection(record, selected)
+                except ValueError as error:
+                    raise Invalid(str(error)) from None
+                planned = proofs.planned_frames(record, captures)
             proof = uuid4().hex[:16]
             title = text(label or "旋转检查稿", "封存名称", 95, empty=False)
             root = folder / "proofs"
             staging = root / ("." + proof)
             staging.mkdir()
             try:
-                result = proofs.write(staging, proof, title, record, lambda photo: folder / "captures" / (photo + ".png"))
+                result = proofs.write(staging, proof, title, record,
+                                      lambda photo: folder / "captures" / (photo + ".png"), planned)
                 staging.rename(root / proof)
             finally:
                 if staging.exists():

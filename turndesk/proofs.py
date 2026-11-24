@@ -19,6 +19,14 @@ def resolved(record):
     return frames
 
 
+def planned_frames(record, captures):
+    """Build frame rows for a recommended circle without touching manual picks."""
+    return [
+        {"angle": slot["angle"], "locked": slot["locked"], "frame": captures[index]}
+        for index, slot in enumerate(record["slots"])
+    ]
+
+
 def contact_sheet(slots, source):
     columns = min(len(slots), 4)
     width, height = 234, 174
@@ -41,8 +49,8 @@ def contact_sheet(slots, source):
     return stream.getvalue()
 
 
-def write(folder: Path, identifier, title, record, source):
-    slots = resolved(record)
+def write(folder: Path, identifier, title, record, source, planned=None):
+    slots = planned if planned is not None else resolved(record)
     frames = []
     for index, slot in enumerate(slots):
         frame = slot["frame"]

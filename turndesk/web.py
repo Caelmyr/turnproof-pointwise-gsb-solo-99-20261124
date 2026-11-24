@@ -103,12 +103,25 @@ def create_app(root):
         return send_file(BytesIO(library.contact(project)), mimetype="image/png", max_age=0,
                          download_name="turnproof-contact.png", as_attachment="download" in request.args)
 
+    @desk.post("/projects/<project>/ring-plan")
+    def ring_plan(project):
+        value = body()
+        return jsonify(library.ring_plan(project, value.get("limit")))
+
+    @desk.post("/projects/<project>/ring-contact")
+    def ring_contact(project):
+        value = body()
+        return send_file(BytesIO(library.contact(project, value.get("selected"))), mimetype="image/png",
+                         max_age=0, download_name="turnproof-ring-contact.png",
+                         as_attachment="download" in request.args)
+
     @desk.route("/projects/<project>/proofs", methods=["GET", "POST"])
     def proofs(project):
         if request.method == "GET":
             return jsonify(library.proof_list(project))
         value = body()
-        return jsonify(library.create_proof(project, value.get("revision"), value.get("title"))), 201
+        return jsonify(library.create_proof(project, value.get("revision"), value.get("title"),
+                                            value.get("selected"))), 201
 
     @desk.get("/projects/<project>/proofs/<proof>")
     def open_proof(project, proof):

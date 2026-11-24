@@ -6,7 +6,7 @@ const esc = value => String(value ?? "").replace(/[&<>"']/g, part => ({
 })[part]);
 const desk = "/turndesk";
 const state = { project: null, slot: 0, capture: null, mode: "capture", proof: null, proofs: [],
-  interval: null, saving: false, exposure: null, noticeTimer: null };
+  ring: null, interval: null, saving: false, exposure: null, noticeTimer: null };
 
 async function api(path, method = "GET", data) {
   const options = {method};
@@ -55,6 +55,12 @@ function angleFrames() {
     }));
   }
   const index = new Map(state.project.captures.map(capture => [capture.id, capture]));
+  if (state.ring) {
+    return state.ring.slots.map((item, i) => ({
+      angle: item.angle, frame: index.get(item.capture), locked: item.locked,
+      movement: state.ring.movements[i],
+    }));
+  }
   return state.project.slots.map(slot => ({angle: slot.angle, frame: index.get(slot.selected), locked: slot.locked}));
 }
 
@@ -94,6 +100,7 @@ async function openProject(identifier, slot = 0, capture = null) {
   state.proofs = proofs;
   state.mode = "capture";
   state.proof = null;
+  state.ring = null;
   const index = Math.min(record.slots.length - 1, Math.max(0, slot));
   state.slot = index;
   state.capture = record.captures.find(item => item.slot === index && item.id === capture)?.id ?? record.slots[index].selected;
@@ -172,7 +179,7 @@ function renderStage(frames, selected, next) {
         ? `落点移动 ${movement.drift.toFixed(2)}% · 横 ${movement.dx.toFixed(2)}% / 纵 ${movement.dy.toFixed(2)}%`
         : "两张原片都标记底座后可读移动";
     };
-    if (state.proof) {
+    if (state.proof || state.ring) {
       show(selected.movement);
     } else {
       api(path("/slots/" + index + "/transition")).then(result => show(result.movement)).catch(error => notice(error.message));
@@ -181,8 +188,8 @@ function renderStage(frames, selected, next) {
   }
 
   el("viewLabel").textContent = selected.angle + "°";
-  const frame = state.mode === "capture" && !state.proof ? getCapture() : selected.frame;
-  stage.innerHTML = frameMarkup(frame, state.mode === "capture" && !state.proof);
+  const frame = state.mode === "capture" && !state.proof && !state.ring ? getCapture() : selected.frame;
+  stage.innerHTML = frameMarkup(frame, state.mode === "capture" && !state.proof && !state.ring);
   if (state.mode === "playback") {
     detail.textContent = `${state.slot + 1} / ${frames.length} · ${frame ? frame.name : "该台位缺片"}`;
     actions.innerHTML = button("上一张", "previous") + button(state.interval ? "暂停" : "循环播放", "play", "primary") + button("下一张", "next");
@@ -190,6 +197,14 @@ function renderStage(frames, selected, next) {
     return;
   }
 
+  if (state.ring) {
+    detail.textContent = frame?.mark
+      ? `推荐预览 · 定位点 x ${frame.mark[0].toFixed(0)} · y ${frame.mark[1].toFixed(0)}（只读）`
+      : "推荐预览 · 该原片缺定位点";
+    actions.innerHTML = frame
+      ? `<a class="button" href="${captureUrl(frame)}?download" download>下载原片</a>` : "";
+    return;
+  }
   detail.textContent = frame?.mark
     ? `定位点 x ${frame.mark[0].toFixed(0)} · y ${frame.mark[1].toFixed(0)} · ${frame.width} × ${frame.height} px`
     : frame ? "在原片上点取底座的同一位置" : "可导入单张 PNG、JPEG 或 TIFF";
@@ -209,6 +224,18 @@ function exposureMarkup() {
 function renderInspector(selected) {
   el("angleTag").textContent = selected.angle + "°";
   const inspector = el("inspector");
+  if (state.ring) {
+    const frame = selected.frame;
+    const mark = frame.mark ? `x ${frame.mark[0]} · y ${frame.mark[1]}` : "未标底座";
+    const movement = selected.movement;
+    el("inspectorTitle").textContent = "推荐圈原片";
+    inspector.innerHTML = `<strong>${esc(frame.name)}</strong><p>${frame.width} × ${frame.height} px · ${mark}</p>
+      <p>${selected.locked ? "锁定台位" : "推荐采用"}${frame.preferred ? " · 细节首选" : ""}</p>
+      <p>到下一台位落点移动 ${movement ? movement.drift.toFixed(2) + "% · 横 " + movement.dx.toFixed(2) + "% / 纵 " + movement.dy.toFixed(2) + "%" : "缺证"}</p>
+      <p class="caption">预览不会改动工作台上的手选；确认封存后才写入封存稿。</p>
+      <div class="action-row">${button("确认封存这一圈", "ringSeal", "primary")}${button("放弃推荐", "ringCancel")}</div>`;
+    return;
+  }
   if (state.proof) {
     const frame = selected.frame;
     const mark = frame.mark ? `x ${frame.mark[0]} · y ${frame.mark[1]}` : "未标底座";
@@ -257,8 +284,14 @@ function render() {
   el("projectStatus").textContent = state.proof ? "已封存 · " + state.project.title :
     `${state.project.synthetic ? "合成样片 · " : ""}${frames.length} 个台位 · 修订 ${state.project.revision}`;
   el("backToReview").hidden = !state.proof;
-  el("seal").hidden = Boolean(state.proof);
+  el("seal").hidden = Boolean(state.proof) || Boolean(state.ring);
+  el("ringPlan").hidden = Boolean(state.proof);
   el("seal").disabled = ready !== frames.length;
+  el("ringBanner").hidden = !state.ring;
+  if (state.ring) {
+    el("ringSummary").textContent =
+      `上限 ${state.ring.limit}% · 细节首选 ${state.ring.preferred_count} 张 · 最大单步 ${state.ring.worst_drift.toFixed(2)}%`;
+  }
   el("coverage").textContent = `${ready} / ${frames.length} 台位已有原片`;
   el("filmstrip").innerHTML = frames.map((slot, index) => `<button class="shot" data-slot="${index}" aria-current="${state.slot === index}">
     ${slot.frame ? `<img src="${captureUrl(slot.frame, "thumb.jpg")}" alt="">` : '<span class="shot-placeholder"></span>'}
@@ -282,7 +315,61 @@ async function openProof(identifier) {
   const proof = await api(path("/proofs/" + identifier));
   setPlaying(false);
   state.proof = proof;
+  state.ring = null;
   switchMode("playback");
+}
+
+function closeRing(refresh = true) {
+  state.ring = null;
+  state.exposure = null;
+  state.capture = state.project.slots[state.slot]?.selected ?? null;
+  if (refresh) {
+    switchMode("capture");
+  }
+}
+
+async function submitRing() {
+  const limit = Number(el("ringLimit").value);
+  const errorBox = el("ringError");
+  errorBox.hidden = true;
+  try {
+    const result = await api(path("/ring-plan"), "POST", {limit});
+    if (!result.feasible) {
+      errorBox.textContent = result.message;
+      errorBox.hidden = false;
+      notice(result.message);
+      return;
+    }
+    el("ringDialog").close();
+    state.ring = result;
+    state.exposure = null;
+    selectSlot(0);
+    switchMode("playback");
+    notice(result.message);
+  } catch (error) {
+    errorBox.textContent = error.message;
+    errorBox.hidden = false;
+  }
+}
+
+async function sealRing() {
+  if (state.saving || !state.ring) return;
+  const selected = state.ring.slots.map(item => item.capture);
+  state.saving = true;
+  try {
+    const proof = await api(path("/proofs"), "POST", {
+      title: el("proofTitle").value, revision: state.project.revision, selected,
+    });
+    state.proofs = await api(path("/proofs"));
+    state.ring = null;
+    el("proofDialog").close();
+    await openProof(proof.id);
+    notice("已按推荐原片封存，可回看和下载；工作台手选保持不变。");
+  } catch (error) {
+    notice(error.message);
+  } finally {
+    state.saving = false;
+  }
 }
 
 const actions = {
@@ -330,27 +417,49 @@ el("backToReview").onclick = () => {
   switchMode("capture");
   selectSlot(state.slot);
 };
-el("contact").onclick = () => {
-  const suffix = state.proof ? "/proofs/" + state.proof.id + "/contact.png" : "/contact.png";
-  const url = desk + path(suffix);
-  el("contactImage").src = url + "?revision=" + state.project.revision;
-  el("contactDownload").href = url + "?download";
+el("contact").onclick = safe(async () => {
+  let url, objectUrl = null, downloadUrl = null;
+  if (state.proof) {
+    url = desk + path("/proofs/" + state.proof.id + "/contact.png");
+  } else if (state.ring) {
+    const response = await fetch(desk + path("/ring-contact"), {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({selected: state.ring.slots.map(item => item.capture)}),
+    });
+    if (!response.ok) throw Error((await response.json()).error || "联系表生成失败");
+    objectUrl = URL.createObjectURL(await response.blob());
+    url = objectUrl;
+    downloadUrl = objectUrl;
+  } else {
+    url = desk + path("/contact.png");
+  }
+  el("contactImage").onload = null;
+  el("contactImage").src = url + (objectUrl ? "" : "?revision=" + state.project.revision);
+  el("contactDownload").href = downloadUrl || (url + "?download");
   el("contactDialog").showModal();
-};
+  el("contactDialog").onclose = () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+});
 el("seal").onclick = () => {
   el("proofTitle").value = state.project.title + " · 检查稿";
   el("proofDialog").showModal();
 };
-el("projectForm").onsubmit = safe(async event => {
+el("ringPlan").onclick = () => {
+  el("ringError").hidden = true;
+  el("ringDialog").showModal();
+};
+el("ringForm").onsubmit = safe(event => {
   event.preventDefault();
-  const title = el("newTitle").value;
-  const count = Number(el("newCount").value);
-  const project = await api("/projects", "POST", {title, count});
-  el("newDialog").close();
-  await openProject(project.id);
+  return submitRing();
 });
+el("ringCancel").onclick = () => closeRing();
+el("ringSeal").onclick = () => {
+  if (!state.ring) return;
+  el("proofTitle").value = state.project.title + " · 合格圈";
+  el("proofDialog").showModal();
+};
 el("proofForm").onsubmit = safe(async event => {
   event.preventDefault();
+  if (state.ring) return sealRing();
   if (state.saving) return;
   state.saving = true;
   try {
@@ -362,6 +471,14 @@ el("proofForm").onsubmit = safe(async event => {
   } finally {
     state.saving = false;
   }
+});
+el("projectForm").onsubmit = safe(async event => {
+  event.preventDefault();
+  const title = el("newTitle").value;
+  const count = Number(el("newCount").value);
+  const project = await api("/projects", "POST", {title, count});
+  el("newDialog").close();
+  await openProject(project.id);
 });
 el("upload").onchange = safe(async () => {
   const file = el("upload").files[0];

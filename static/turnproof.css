@@ -36,6 +36,9 @@ h1{font-size:clamp(23px,2.6vw,37px);letter-spacing:-.045em;margin:2px 0;font-wei
 h2{font-size:20px;margin:0 0 10px}
 .caption{color:var(--dim);font-size:12px}
 .project-bar{margin-bottom:16px;gap:14px}
+.ring-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;padding:10px 14px;border:1px solid #b9c8b0;background:#eef3e8;border-radius:11px}
+.ring-banner strong{margin-right:10px}
+.ring-error{color:#8a3b2e;font-size:13px;background:#f6e6e1;border-radius:7px;padding:8px 10px;margin:4px 0 10px}
 .work-grid{display:grid;grid-template-columns:minmax(0,1fr) 268px;gap:14px}
 .card{min-width:0;background:var(--panel);border:1px solid var(--border);border-radius:11px;overflow:hidden}
 .bar{padding:10px 12px;border-bottom:1px solid var(--border);min-height:46px}
