@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TurnProof · 旋转摄影台</title>
+  <link rel="stylesheet" href="/static/turnproof.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/" aria-label="TurnProof 首页"><span class="logo" aria-hidden="true">◐</span>TurnProof<span class="brand-sub">旋转摄影台</span></a>
+    <span class="top-meta">商品摄影 / 原片检查</span>
+  </header>
+  <div class="layout">
+    <aside class="library">
+      <div class="library-head"><h2>我的转台</h2><button id="newProject" class="mini" aria-label="新建转台" title="新建转台">＋</button></div>
+      <div id="projects" class="projects"></div>
+      <button id="demoProject" class="demo">打开六面合成样片 <span aria-hidden="true">↗</span></button>
+      <div class="library-foot">本机工作区 <i aria-hidden="true"></i></div>
+    </aside>
+    <main>
+      <section id="empty" class="empty">
+        <div class="empty-orbit" aria-hidden="true">◐</div>
+        <h1>旋转摄影检查</h1>
+        <p>按台位导入商品照片。标记底座定位点，检查相邻画面各移动了多少，再封存这一圈。</p>
+        <button id="emptyDemo" class="primary">打开合成样片</button>
+      </section>
+      <div id="workspace" hidden>
+        <div class="project-bar">
+          <div><div id="projectStatus" class="caption"></div><h1 id="projectTitle"></h1></div>
+          <div class="action-row">
+            <button id="contact">联系表</button>
+            <button id="seal" class="primary">封存此圈</button>
+            <button id="backToReview" hidden>返回工作台</button>
+          </div>
+        </div>
+        <section class="work-grid" aria-label="照片检查">
+          <div class="viewer card">
+            <div class="bar">
+              <div class="action-row" aria-label="预览模式">
+                <button id="viewCapture" class="tab">原片</button>
+                <button id="viewTransition" class="tab">相邻过渡</button>
+                <button id="viewPlayback" class="tab">循环回看</button>
+              </div>
+              <span id="viewLabel" class="caption"></span>
+            </div>
+            <div id="stage" class="stage" aria-live="off"></div>
+            <div class="view-footer">
+              <span id="viewDetail" class="viewer-caption"></span>
+              <div id="viewerActions" class="action-row"></div>
+            </div>
+          </div>
+          <aside class="inspector card">
+            <div class="bar"><strong id="inspectorTitle">台位原片</strong><span id="angleTag" class="pill"></span></div>
+            <div class="inspector-content" id="inspector"></div>
+          </aside>
+        </section>
+        <section class="strip card" aria-label="转台台位">
+          <div class="bar"><strong>转台台位</strong><span id="coverage" class="caption"></span></div>
+          <div id="filmstrip" class="filmstrip"></div>
+        </section>
+        <section class="archive card" aria-label="封存记录">
+          <div class="bar"><strong>封存稿</strong><span id="proofCount" class="caption"></span></div>
+          <div id="proofs" class="proofs"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <dialog id="newDialog">
+    <form id="projectForm">
+      <h2>新建转台</h2>
+      <label>工程名称<input id="newTitle" required maxlength="95" placeholder="如：秋季陶器商品图"></label>
+      <label>等角度台位<select id="newCount"><option value="6">6 · 每步 60°</option><option value="8">8 · 每步 45°</option><option value="12">12 · 每步 30°</option><option value="18">18 · 每步 20°</option><option value="24">24 · 每步 15°</option></select></label>
+      <div class="action-row"><button type="button" data-close="newDialog">取消</button><button class="primary">创建</button></div>
+    </form>
+  </dialog>
+  <dialog id="proofDialog">
+    <form id="proofForm">
+      <h2>封存此圈</h2>
+      <label>封存名称<input id="proofTitle" required maxlength="95"></label>
+      <div class="action-row"><button type="button" data-close="proofDialog">取消</button><button class="primary">保存封存稿</button></div>
+    </form>
+  </dialog>
+  <dialog id="contactDialog">
+    <div class="dialog-header"><h2>已采用原片联系表</h2><button data-close="contactDialog">关闭</button></div>
+    <img id="contactImage" alt="按等角度排列的已采用原片联系表">
+    <a id="contactDownload" class="button" download>下载联系表</a>
+  </dialog>
+  <input id="upload" type="file" accept=".png,.jpg,.jpeg,.tif,.tiff" hidden>
+  <div id="notice" role="status" hidden></div>
+  <script src="/static/turnproof.js"></script>
+</body>
+</html>

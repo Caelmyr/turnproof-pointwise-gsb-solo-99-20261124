@@ -1,0 +1,23 @@
+name: solo102-turndesk
+services:
+  desk:
+    build:
+      context: .
+      args:
+        TURNPROOF_RUNTIME_IMAGE: ${TURNPROOF_RUNTIME_IMAGE:-python:3.12-slim}
+    image: ${TURNPROOF_IMAGE:-solo102-turndesk:1.0}
+    network_mode: bridge
+    environment:
+      OPENBLAS_NUM_THREADS: 1
+      OMP_NUM_THREADS: 1
+    ports:
+      - "127.0.0.1:${TURNPROOF_PORT:-19902}:8000"
+    volumes:
+      - turn-data:/var/lib/turndesk
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; assert urlopen('http://127.0.0.1:8000/turndesk/health', timeout=3).status == 200"]
+      interval: 3s
+      timeout: 4s
+      retries: 12
+volumes:
+  turn-data:
