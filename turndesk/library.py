@@ -3,17 +3,19 @@
 from collections import Counter
 from hashlib import sha256
 import json
+from io import BytesIO
 from pathlib import Path
 import re
 from shutil import rmtree
 from threading import RLock
 from uuid import uuid4
 
+from PIL import Image
 from werkzeug.exceptions import NotFound
 
 from image_lab.validation import Conflict, Invalid, boolean, integer, text, timestamp
 
-from . import demo, inspection, photos, proofs
+from . import cropping, demo, inspection, photos, proofs
 
 
 KEY = re.compile(r"[0-9a-f]{16}")
@@ -95,7 +97,7 @@ class Library:
                 "id": identifier, "title": text(title, "工程名称", 95, empty=False), "created": timestamp(),
                 "synthetic": synthetic, "revision": 1,
                 "slots": [{"angle": index * 360 // count, "selected": None, "locked": False} for index in range(count)],
-                "captures": [],
+                "captures": [], "crop_plan": None,
             }
             if synthetic:
                 for index, label, image, mark, preferred, locked in demo.sequence():
@@ -166,6 +168,7 @@ class Library:
             capture = find_capture(record, capture_key)
             if "mark" in patch:
                 capture["mark"] = inspection.checked_mark(patch["mark"], capture)
+                record["crop_plan"] = None
             if "preferred" in patch:
                 capture["preferred"] = boolean(patch["preferred"], "细节首选")
             return self._update(self.folder(identifier), record)
@@ -181,6 +184,8 @@ class Library:
                     raise Invalid("只能采用同一台位的原片。")
                 if slot["locked"] and slot["selected"] != capture["id"]:
                     raise Invalid("先解锁这个台位再替换原片。")
+                if slot["selected"] != capture["id"]:
+                    record["crop_plan"] = None
                 slot["selected"] = capture["id"]
             if "locked" in patch:
                 locked = boolean(patch["locked"], "锁定台位")
@@ -189,6 +194,58 @@ class Library:
                 slot["locked"] = locked
             return self._update(self.folder(identifier), record)
 
+    def crop_proposal(self, identifier, expected, anchor_x, anchor_y, tolerance):
+        """Compute the proposal; nothing is stored until the user confirms it."""
+        with self.lock:
+            record = self.record(identifier)
+            revision(record, expected)
+            return cropping.plan(inspection.manual_frames(record), anchor_x, anchor_y, tolerance)
+
+    def save_crop_plan(self, identifier, expected, plan):
+        with self.lock:
+            record = self.record(identifier)
+            revision(record, expected)
+            if not isinstance(plan, dict) or not isinstance(plan.get("frames"), list) \
+                    or not isinstance(plan.get("anchor_request"), list) or len(plan["anchor_request"]) != 2:
+                raise Invalid("裁窗计划格式不正确。")
+            fresh = cropping.plan(inspection.manual_frames(record),
+                                  plan["anchor_request"][0],
+                                  plan["anchor_request"][1],
+                                  plan.get("tolerance"))
+            if "plan" not in fresh:
+                raise Invalid("这组裁窗已经不再适用，请重新计算。")
+            current = fresh["plan"]
+            if current["width"] != plan.get("width") or current["height"] != plan.get("height") \
+                    or current["anchor"] != plan.get("anchor"):
+                raise Invalid("这组裁窗已经不再适用，请重新计算。")
+            record["crop_plan"] = current
+            return self._update(self.folder(identifier), record)
+
+    def clear_crop_plan(self, identifier, expected):
+        with self.lock:
+            record = self.record(identifier)
+            revision(record, expected)
+            record["crop_plan"] = None
+            return self._update(self.folder(identifier), record)
+
+    def current_plan(self, record):
+        plan = record.get("crop_plan")
+        return plan if cropping.is_current(plan, record) else None
+
+    def crop_png(self, identifier, index):
+        with self.lock:
+            record = self.record(identifier)
+            plan = self.current_plan(record)
+            if plan is None:
+                raise NotFound("这圈还没有确认的 16:9 裁窗。")
+            window = cropping.window_for(plan, integer(index, "台位", 0, len(record["slots"]) - 1))
+            capture = find_capture(record, window["capture"])
+            folder = self.folder(identifier)
+            stream = BytesIO()
+            with Image.open(folder / "captures" / (capture["id"] + ".png")) as image:
+                cropping.crop_image(image, window).save(stream, format="PNG")
+            return stream.getvalue()
+
     def capture_path(self, identifier, capture, thumbnail=False):
         find_capture(self.record(identifier), capture)
         return self.folder(identifier) / "captures" / (capture + (".jpg" if thumbnail else ".png"))
@@ -196,7 +253,9 @@ class Library:
     def contact(self, identifier):
         record = self.record(identifier)
         folder = self.folder(identifier)
-        return proofs.contact_sheet(inspection.manual_frames(record), lambda photo: folder / "captures" / (photo + ".png"))
+        plan = self.current_plan(record)
+        return proofs.contact_sheet(inspection.manual_frames(record),
+                                    lambda photo: folder / "captures" / (photo + ".png"), plan)
 
     def proof_list(self, identifier):
         self.record(identifier)
@@ -222,7 +281,9 @@ class Library:
             staging = root / ("." + proof)
             staging.mkdir()
             try:
-                result = proofs.write(staging, proof, title, record, lambda photo: folder / "captures" / (photo + ".png"))
+                result = proofs.write(staging, proof, title, record,
+                                      lambda photo: folder / "captures" / (photo + ".png"),
+                                      self.current_plan(record))
                 staging.rename(root / proof)
             finally:
                 if staging.exists():

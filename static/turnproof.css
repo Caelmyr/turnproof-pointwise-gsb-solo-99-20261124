@@ -85,6 +85,17 @@ dialog::backdrop{background:#1d2d255f}
 dialog label{display:grid;gap:5px;margin-bottom:12px;font-size:13px;font-weight:650}
 input:not([type=file]),select{border:1px solid var(--border);border-radius:6px;background:white;color:var(--dark);padding:7px 8px;min-width:0}
 dialog .action-row{justify-content:flex-end;margin-top:16px}
+.form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.form-grid label{margin-bottom:0}
+.crop-result{margin:12px 0;padding:12px;border:1px solid #b9c7b6;border-radius:8px;background:var(--light);font-size:13px}
+.crop-result p{margin:6px 0 0}
+.crop-ok strong{color:var(--accent)}
+.crop-blocked{margin:12px 0;padding:12px;border:1px solid #c9a48b;border-radius:8px;background:#f6ece2;font-size:13px}
+.crop-blocked ul{margin:8px 0 0;padding-left:18px;display:grid;gap:4px}
+.crop-status{border-top:1px solid var(--border);margin-top:10px;padding-top:8px;font-size:13px}
+.crop-status p{color:var(--accent);font-weight:650}
+.mark.anchor{border-color:#e8743b;box-shadow:0 0 0 1px #5a2c14}
+.mark.anchor:after,.mark.anchor:before{background:#e8743b}
 #contactDialog{width:min(800px,calc(100% - 30px))}
 #contactImage{display:block;width:100%;margin:10px 0 14px}
 #notice{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);max-width:min(620px,90vw);background:var(--dark);color:white;box-shadow:0 6px 30px #13251944;padding:9px 15px;border-radius:7px;z-index:9}

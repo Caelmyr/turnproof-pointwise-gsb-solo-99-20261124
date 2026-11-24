@@ -30,6 +30,7 @@
           <div><div id="projectStatus" class="caption"></div><h1 id="projectTitle"></h1></div>
           <div class="action-row">
             <button id="contact">联系表</button>
+            <button id="cropPlan">16:9 裁窗</button>
             <button id="seal" class="primary">封存此圈</button>
             <button id="backToReview" hidden>返回工作台</button>
           </div>
@@ -79,6 +80,21 @@
       <h2>封存此圈</h2>
       <label>封存名称<input id="proofTitle" required maxlength="95"></label>
       <div class="action-row"><button type="button" data-close="proofDialog">取消</button><button class="primary">保存封存稿</button></div>
+    </form>
+  </dialog>
+  <dialog id="cropDialog">
+    <form id="cropForm">
+      <h2>统一 16:9 裁窗</h2>
+      <p class="caption">每张只在自己的原片内裁，不缩放、不补边；底座定位点在每张成图里落在同一像素。纵向按落点取最近像素，横向可在容许百分点内偏开。</p>
+      <div class="form-grid">
+        <label>横向构图落点（%）<input id="cropAnchorX" type="number" min="0" max="100" step="0.1" value="50" required></label>
+        <label>纵向构图落点（%）<input id="cropAnchorY" type="number" min="0" max="100" step="0.1" value="68" required></label>
+        <label>横向容许偏离（百分点）<input id="cropTolerance" type="number" min="0" max="100" step="0.1" value="5" required></label>
+      </div>
+      <div id="cropResult" class="crop-result" hidden></div>
+      <div class="action-row"><button type="button" data-close="cropDialog">取消</button>
+        <button type="button" id="cropCalc">计算裁窗</button>
+        <button type="submit" class="primary" id="cropConfirm" disabled>确认这组裁窗</button></div>
     </form>
   </dialog>
   <dialog id="contactDialog">

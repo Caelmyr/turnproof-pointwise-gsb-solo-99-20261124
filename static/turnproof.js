@@ -6,7 +6,8 @@ const esc = value => String(value ?? "").replace(/[&<>"']/g, part => ({
 })[part]);
 const desk = "/turndesk";
 const state = { project: null, slot: 0, capture: null, mode: "capture", proof: null, proofs: [],
-  interval: null, saving: false, exposure: null, noticeTimer: null };
+  interval: null, saving: false, exposure: null, noticeTimer: null,
+  cropPlan: null, cropProposal: null, viewSource: false };
 
 async function api(path, method = "GET", data) {
   const options = {method};
@@ -42,6 +43,21 @@ function safe(action) {
 function path(suffix = "") { return "/projects/" + state.project.id + suffix; }
 function captureUrl(capture, raster = "source.png") { return desk + path("/captures/" + capture.id + "/" + raster); }
 function button(label, action, style = "") { return `<button class="${style}" data-action="${action}">${label}</button>`; }
+
+function activeCropPlan() {
+  if (state.proof) return state.proof.crop_plan || null;
+  return state.cropPlan;
+}
+
+function cropUrl(slot) {
+  const plan = activeCropPlan();
+  if (!plan) return null;
+  if (state.proof) {
+    const entry = state.proof.frames[slot];
+    return desk + path("/proofs/" + state.proof.id + "/frames/" + entry.angle + "/crop.png");
+  }
+  return desk + path("/slots/" + slot + "/crop.png?revision=" + state.project.revision);
+}
 
 function setPlaying(playing) {
   clearInterval(state.interval);
@@ -89,11 +105,15 @@ async function refreshProjects() {
 async function openProject(identifier, slot = 0, capture = null) {
   const record = await api("/projects/" + identifier);
   const proofs = await api("/projects/" + identifier + "/proofs");
+  const crop = await api("/projects/" + identifier + "/crop-plan");
   setPlaying(false);
   state.project = record;
   state.proofs = proofs;
   state.mode = "capture";
   state.proof = null;
+  state.cropPlan = crop.plan;
+  state.cropProposal = null;
+  state.viewSource = false;
   const index = Math.min(record.slots.length - 1, Math.max(0, slot));
   state.slot = index;
   state.capture = record.captures.find(item => item.slot === index && item.id === capture)?.id ?? record.slots[index].selected;
@@ -122,6 +142,7 @@ async function change(suffix, method, data) {
     }
     if (state.project.id !== identifier) return;
     state.project = result.project || result;
+    if (result.project) state.cropPlan = result.project.crop_plan || null;
     if (result.capture && result.capture.slot === state.slot) state.capture = result.capture.id;
     render();
   } finally {
@@ -136,18 +157,33 @@ function marker(frame) {
   return `<span class="mark" style="left:${left}%;top:${top}%" aria-hidden="true"></span>`;
 }
 
-function frameMarkup(frame, clickable = false) {
+function anchorMarker(plan, width, height) {
+  const left = 100 * (plan.anchor[0] + 0.5) / width;
+  const top = 100 * (plan.anchor[1] + 0.5) / height;
+  return `<span class="mark anchor" style="left:${left}%;top:${top}%" aria-hidden="true"></span>`;
+}
+
+function frameMarkup(frame, clickable = false, cropPlan = null, slotIndex = state.slot, sourceFallback = false) {
   if (!frame) return '<span class="stage-empty">这个台位还没有原片</span>';
+  if (cropPlan && !sourceFallback) {
+    const window = cropPlan.frames.find(item => item.slot === slotIndex);
+    if (window) {
+      return `<div class="stage-image" style="--ratio:${window.width / window.height}">
+        <img src="${cropUrl(slotIndex)}" width="${window.width}" height="${window.height}" alt="${esc(frame.name)} · 16:9 裁图">
+        ${anchorMarker(cropPlan, window.width, window.height)}</div>`;
+    }
+  }
   return `<div class="stage-image${clickable ? " clickable" : ""}" style="--ratio:${frame.width / frame.height}">
     <img src="${captureUrl(frame)}" width="${frame.width}" height="${frame.height}" alt="${esc(frame.name)}"${clickable ? ' id="captureRaster"' : ""}>
     ${marker(frame)}</div>`;
 }
 
 function preloadNext(frame) {
-  if (frame) {
-    const image = new Image();
-    image.src = captureUrl(frame);
-  }
+  if (!frame) return;
+  const plan = activeCropPlan();
+  const nextIndex = (state.slot + 1) % angleFrames().length;
+  const image = new Image();
+  image.src = plan && !state.viewSource && cropUrl(nextIndex) ? cropUrl(nextIndex) : captureUrl(frame);
 }
 
 function renderStage(frames, selected, next) {
@@ -159,9 +195,9 @@ function renderStage(frames, selected, next) {
   }
   if (state.mode === "transition") {
     el("viewLabel").textContent = `${selected.angle}° → ${next.angle}°${next.angle === 0 ? " · 末回首" : ""}`;
-    stage.innerHTML = `<div class="stage-grid"><figure>${frameMarkup(selected.frame)}
+    stage.innerHTML = `<div class="stage-grid"><figure>${frameMarkup(selected.frame, false, null, state.slot)}
       <figcaption>${selected.angle}° · ${esc(selected.frame?.name || "无原片")}</figcaption></figure>
-      <figure>${frameMarkup(next.frame)}<figcaption>${next.angle}° · ${esc(next.frame?.name || "无原片")}</figcaption></figure></div>`;
+      <figure>${frameMarkup(next.frame, false, null, (state.slot + 1) % frames.length)}<figcaption>${next.angle}° · ${esc(next.frame?.name || "无原片")}</figcaption></figure></div>`;
     detail.textContent = "正在读定位点";
     actions.innerHTML = button("上一对", "previous") + button("下一对", "next");
     const project = state.project.id, index = state.slot, revision = state.project.revision;
@@ -181,11 +217,20 @@ function renderStage(frames, selected, next) {
   }
 
   el("viewLabel").textContent = selected.angle + "°";
+  const plan = activeCropPlan();
   const frame = state.mode === "capture" && !state.proof ? getCapture() : selected.frame;
-  stage.innerHTML = frameMarkup(frame, state.mode === "capture" && !state.proof);
+  if (state.mode === "capture" && !state.proof) {
+    stage.innerHTML = frameMarkup(frame, true);
+  } else {
+    stage.innerHTML = frameMarkup(frame, false, plan, state.slot, state.viewSource);
+  }
   if (state.mode === "playback") {
     detail.textContent = `${state.slot + 1} / ${frames.length} · ${frame ? frame.name : "该台位缺片"}`;
-    actions.innerHTML = button("上一张", "previous") + button(state.interval ? "暂停" : "循环播放", "play", "primary") + button("下一张", "next");
+    const toggle = plan
+      ? button(state.viewSource ? "看 16:9 裁图" : "切回原片核对底座", "toggleView", "primary")
+      : "";
+    actions.innerHTML = button("上一张", "previous") + button(state.interval ? "暂停" : "循环播放", "play", "primary")
+      + button("下一张", "next") + toggle;
     preloadNext(next.frame);
     return;
   }
@@ -214,9 +259,15 @@ function renderInspector(selected) {
     const mark = frame.mark ? `x ${frame.mark[0]} · y ${frame.mark[1]}` : "未标底座";
     const suffix = "/proofs/" + state.proof.id;
     el("inspectorTitle").textContent = "封存原片";
+    const crop = state.proof.crop_plan;
+    const cropLine = crop
+      ? `<p>16:9 裁图 ${crop.width} × ${crop.height} px · 底座同点 x ${crop.anchor[0]} · y ${crop.anchor[1]}</p>
+         <div class="action-row"><a class="button" href="${desk + path("/proofs/" + state.proof.id + "/frames/" + selected.angle + "/crop.png?download")}" download>下载本角度 PNG</a>
+         <a class="button" href="${desk + path("/proofs/" + state.proof.id + "/frames/" + selected.angle + "/source.png?download")}" download>下载原片</a></div>`
+      : "";
     inspector.innerHTML = `<strong>${esc(frame.name)}</strong><p>${frame.width} × ${frame.height} px · ${mark}</p>
       <p>${selected.locked ? "锁定台位" : "已采用"}${frame.preferred ? " · 细节首选" : ""}</p>
-      <p>封存来源 · 修订 ${state.proof.source_revision}</p>
+      <p>封存来源 · 修订 ${state.proof.source_revision}</p>${cropLine}
       <div class="action-row"><a class="button primary" href="${desk + path(suffix + "/spin.zip")}" download>下载交付 ZIP</a></div>`;
     return;
   }
@@ -229,9 +280,14 @@ function renderInspector(selected) {
     <small>${frame.id === selected.frame?.id ? "已采用" + (selected.locked ? " · 已锁" : "") : "补拍"}${frame.preferred ? " · 细节首选" : ""}</small></span></button>`).join("");
   const preference = capture?.preferred ? "取消细节首选" : "标为细节首选";
   const prep = new URLSearchParams({turntable: state.project.id, slot: state.slot});
+  const cropStatus = state.cropPlan
+    ? `<div class="crop-status"><p>已确认 16:9 裁窗 ${state.cropPlan.width} × ${state.cropPlan.height} px · 底座同点 x ${state.cropPlan.anchor[0]} · y ${state.cropPlan.anchor[1]}</p>
+       <div class="action-row">${button("清除裁窗重算", "clearCrop")}</div></div>`
+    : '<p class="caption">顶部「16:9 裁窗」可按构图落点统一规划。</p>';
   inspector.innerHTML = `<div class="capture-list">${cards || '<p>从一张照片开始。</p>'}</div>
     <div class="action-row">${button("＋ 导入原片", "upload")}${selected.frame ? button(selected.locked ? "解锁台位" : "锁定台位", "lock") : ""}</div>
     <a class="input-link" href="/prepare?${prep}">打开照片准备 ↗</a>
+    ${cropStatus}
     ${capture ? `<div class="capture-info">
       ${capture.origin?.preparation_result ? '<p>来源 · 照片准备</p>' : ""}
       <div class="action-row">
@@ -259,7 +315,9 @@ function render() {
   el("backToReview").hidden = !state.proof;
   el("seal").hidden = Boolean(state.proof);
   el("seal").disabled = ready !== frames.length;
-  el("coverage").textContent = `${ready} / ${frames.length} 台位已有原片`;
+  el("cropPlan").hidden = Boolean(state.proof);
+  el("coverage").textContent = `${ready} / ${frames.length} 台位已有原片`
+    + (state.cropPlan ? ` · 16:9 裁窗 ${state.cropPlan.width}×${state.cropPlan.height}` : "");
   el("filmstrip").innerHTML = frames.map((slot, index) => `<button class="shot" data-slot="${index}" aria-current="${state.slot === index}">
     ${slot.frame ? `<img src="${captureUrl(slot.frame, "thumb.jpg")}" alt="">` : '<span class="shot-placeholder"></span>'}
     <b>${slot.angle}° <span>${slot.locked ? "锁定" : ""}</span></b></button>`).join("");
@@ -282,6 +340,7 @@ async function openProof(identifier) {
   const proof = await api(path("/proofs/" + identifier));
   setPlaying(false);
   state.proof = proof;
+  state.viewSource = false;
   switchMode("playback");
 }
 
@@ -291,6 +350,14 @@ const actions = {
   use: () => change("/slots/" + state.slot, "PATCH", {selected: state.capture}),
   prefer: () => change("/captures/" + state.capture, "PATCH", {preferred: !getCapture().preferred}),
   clearMark: () => change("/captures/" + state.capture, "PATCH", {mark: null}),
+  clearCrop: safe(async () => {
+    state.project = await api(path("/crop-plan"), "DELETE", {revision: state.project.revision});
+    state.cropPlan = null;
+    state.cropProposal = null;
+    render();
+    notice("已清除裁窗，手选照片原样保留。");
+  }),
+  toggleView: () => { state.viewSource = !state.viewSource; render(); },
   exposure: async () => {
     const capture = state.capture, project = state.project.id;
     const data = await api(path("/captures/" + capture + "/exposure"));
@@ -327,6 +394,7 @@ el("viewTransition").onclick = () => switchMode("transition");
 el("viewPlayback").onclick = () => switchMode("playback");
 el("backToReview").onclick = () => {
   state.proof = null;
+  state.viewSource = false;
   switchMode("capture");
   selectSlot(state.slot);
 };
@@ -341,6 +409,79 @@ el("seal").onclick = () => {
   el("proofTitle").value = state.project.title + " · 检查稿";
   el("proofDialog").showModal();
 };
+
+function cropInputs() {
+  return {
+    anchor_x: Number(el("cropAnchorX").value),
+    anchor_y: Number(el("cropAnchorY").value),
+    tolerance: Number(el("cropTolerance").value),
+  };
+}
+
+function blockedMarkup(blocked) {
+  if (blocked.kind === "incomplete") {
+    const frames = blocked.missing_frames.map(angle => `<li>${angle}° 台位还没有采用原片</li>`).join("");
+    const marks = blocked.missing_marks.map(item => `<li>${item.angle}° · ${esc(item.name)} 未标底座定位点</li>`).join("");
+    return `<div class="crop-blocked"><strong>这次交付被挡住了：</strong><ul>${frames}${marks}</ul>
+      <p class="caption">手选照片原样保留，补齐后重新计算即可。</p></div>`;
+  }
+  const top = blocked.at_largest_window;
+  const vertical = top.details.filter(item => !item.vertical_ok)
+    .map(item => `<li>${item.angle}°：纵向落点需要 y=${top.anchor_y_px}px，底座 y=${item.mark[1]} 超出原片上下余量</li>`).join("");
+  const horizontal = top.details.filter(item => !item.within_tolerance)
+    .map(item => `<li>${item.angle}°：横向可行锚点 ${item.anchor_x_range[0]}–${item.anchor_x_range[1]}px，落在容许带 ${blocked.at_largest_window.tolerance_band.join("–")}px 之外</li>`).join("");
+  const clash = top.image_intersection === null
+    ? `<li>各台位要求的横向锚点没有共同像素区间（最大尝试窗口 ${top.window.join("×")}）</li>` : "";
+  return `<div class="crop-blocked"><strong>找不到一组都能裁出来的窗口：</strong><ul>${vertical}${horizontal}${clash}</ul>
+    <p class="caption">可放宽横向容许百分点或调整构图落点后重试；原片与手选不会被改动。</p></div>`;
+}
+
+function cropResultMarkup(plan) {
+  return `<div class="crop-ok">
+    <strong>统一裁窗 ${plan.width} × ${plan.height} px · 16:9</strong>
+    <p>底座在每张成图的同一像素：x ${plan.anchor[0]} · y ${plan.anchor[1]}
+      （横向 ${plan.anchor_pct[0]}% · 纵向 ${plan.anchor_pct[1]}%）</p>
+    <p class="caption">每台位窗口都在各自原片内，无缩放、无补边。确认后在循环回看里检查。</p>
+  </div>`;
+}
+
+el("cropPlan").onclick = () => {
+  el("cropResult").hidden = true;
+  el("cropResult").innerHTML = "";
+  state.cropProposal = state.cropPlan;
+  el("cropConfirm").disabled = !state.cropPlan;
+  if (state.cropPlan) {
+    el("cropResult").innerHTML = cropResultMarkup(state.cropPlan);
+    el("cropResult").hidden = false;
+  }
+  el("cropDialog").showModal();
+};
+
+el("cropCalc").onclick = safe(async () => {
+  const result = await api(path("/crop-plan"), "POST", {revision: state.project.revision, ...cropInputs()});
+  el("cropResult").hidden = false;
+  if (result.plan) {
+    state.cropProposal = result.plan;
+    el("cropResult").innerHTML = cropResultMarkup(result.plan);
+    el("cropConfirm").disabled = false;
+  } else {
+    state.cropProposal = null;
+    el("cropResult").innerHTML = blockedMarkup(result.blocked);
+    el("cropConfirm").disabled = true;
+  }
+});
+
+el("cropForm").onsubmit = safe(async event => {
+  event.preventDefault();
+  if (!state.cropProposal) return;
+  state.project = await api(path("/crop-plan"), "PUT",
+    {revision: state.project.revision, plan: state.cropProposal});
+  state.cropPlan = state.project.crop_plan;
+  state.viewSource = false;
+  el("cropDialog").close();
+  switchMode("playback");
+  notice("裁窗已确认，可在循环回看里切原片核对底座。");
+});
 el("projectForm").onsubmit = safe(async event => {
   event.preventDefault();
   const title = el("newTitle").value;

@@ -4,6 +4,7 @@ from io import BytesIO
 from pathlib import Path
 
 from flask import Blueprint, jsonify, render_template, request, send_file
+from werkzeug.exceptions import NotFound
 
 from image_lab import create_app as create_preparation
 from image_lab.validation import Invalid, object_value
@@ -98,6 +99,53 @@ def create_app(root):
         slot_at(record, index)
         return jsonify(inspection.manual_transition(record, index))
 
+    @desk.route("/projects/<project>/crop-plan", methods=["GET", "POST", "DELETE"])
+    def crop_plan(project):
+        if request.method == "GET":
+            record = library.record(project)
+            return jsonify({"plan": library.current_plan(record)})
+        if request.method == "DELETE":
+            value = body()
+            return jsonify(library.clear_crop_plan(project, value.get("revision")))
+        value = body()
+        return jsonify(library.crop_proposal(
+            project, value.get("revision"), value.get("anchor_x"),
+            value.get("anchor_y"), value.get("tolerance")))
+
+    @desk.put("/projects/<project>/crop-plan")
+    def save_crop_plan(project):
+        value = body()
+        return jsonify(library.save_crop_plan(project, value.get("revision"), value.get("plan")))
+
+    @desk.get("/projects/<project>/slots/<int:index>/crop.png")
+    def slot_crop(project, index):
+        record = library.record(project)
+        slot_at(record, index)
+        return send_file(BytesIO(library.crop_png(project, index)), mimetype="image/png",
+                         max_age=0, download_name=f"turnproof-crop-{record['slots'][index]['angle']:03}.png",
+                         as_attachment="download" in request.args)
+
+    @desk.get("/projects/<project>/proofs/<proof>/frames/<int:angle>/crop.png")
+    def proof_crop(project, proof, angle):
+        folder, sealed = library.proof(project, proof)
+        frame = next((item for item in sealed["frames"] if item["angle"] == angle), None)
+        if frame is None or not frame.get("crop"):
+            raise NotFound("封存稿里没有这个角度的 16:9 裁图。")
+        return send_file(BytesIO((folder / frame["file"]).read_bytes()), mimetype="image/png",
+                         max_age=0, download_name=f"turnproof-crop-{angle:03}.png",
+                         as_attachment="download" in request.args)
+
+    @desk.get("/projects/<project>/proofs/<proof>/frames/<int:angle>/source.png")
+    def proof_source(project, proof, angle):
+        _, sealed = library.proof(project, proof)
+        frame = next((item for item in sealed["frames"] if item["angle"] == angle), None)
+        if frame is None:
+            raise NotFound("封存稿里没有这个角度。")
+        return send_file(BytesIO(library.capture_path(project, frame["capture"]["id"]).read_bytes()),
+                         mimetype="image/png", max_age=0,
+                         download_name=f"turnproof-source-{angle:03}.png",
+                         as_attachment="download" in request.args)
+
     @desk.get("/projects/<project>/contact.png")
     def contact(project):
         return send_file(BytesIO(library.contact(project)), mimetype="image/png", max_age=0,
@@ -123,8 +171,12 @@ def create_app(root):
     @desk.get("/projects/<project>/proofs/<proof>/spin.zip")
     def proof_bundle(project, proof):
         folder, _ = library.proof(project, proof)
-        return send_file(folder / "spin.zip", mimetype="application/zip",
-                         download_name="turnproof-spin.zip", as_attachment=True)
+        return send_file(BytesIO((folder / "spin.zip").read_bytes()), mimetype="application/zip",
+                         max_age=0, download_name="turnproof-spin.zip", as_attachment=True)
+
+    @app.errorhandler(NotFound)
+    def not_found(error):
+        return jsonify(error=str(error.description), type="not_found"), 404
 
     app.register_blueprint(desk)
     return app
